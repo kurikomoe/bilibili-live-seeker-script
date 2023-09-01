@@ -1,14 +1,12 @@
 // ==UserScript==
 // @name         Bilibili直播自动追帧
-// @namespace    https://space.bilibili.com/521676
-// @version      0.6.18
-// @description  自动追帧bilibili直播至设定的buffer length
-// @author       c_b
+// @version      0.6.18.mod
+// @description  自动追帧bilibili直播至设定的buffer length，支持使用任意livestream flv流
+// @author       c_b, KurikoMoe
 // @match        https://live.bilibili.com/*
 // @icon         https://www.bilibili.com/favicon.ico
 // @license      GPLv3 License
-// @homepageURL  https://github.com/c-basalt/bilibili-live-seeker-script/
-// @supportURL   https://space.bilibili.com/521676
+// @homepageURL  https://github.com/kurikomoe/bilibili-live-seeker-script
 // @run-at       document-start
 // @grant        none
 // ==/UserScript==
@@ -348,7 +346,11 @@
             console.debug('playurl', playurl);
             const baseurl = playurl.stream[0].format[0].codec[0].base_url;
             const qn = playurl.stream[0].format[0].codec[0].current_qn;
-            if (qn === 10000 && baseurl.match(/\/live_\d+_\d+\.flv/)) {
+            if (playurl.stream[0].format[0].codec[0].force == 1) {
+                // 强制的链接格式
+                console.debug('raw stream url', baseurl);
+                localStorage.setItem('playurl-' + playurl.cid, JSON.stringify(playurl));
+            } else if (qn === 10000 && baseurl.match(/\/live_\d+_\d+\.flv/)) {
                 // 未二压的链接格式
                 console.debug('raw stream url', baseurl);
                 localStorage.setItem('playurl-' + playurl.cid, JSON.stringify(playurl));
@@ -362,6 +364,9 @@
         const keys = Array.from(Array(localStorage.length).keys()).map(i => localStorage.key(i));
         keys.filter(i => i.match(/^playurl-\d+/)).forEach(i => {
             const cachedUrl = JSON.parse(localStorage.getItem(i));
+            if (!cachedUrl.stream[0].format[0].codec[0].extra) {
+                return;
+            }
             const expireTs = Number(cachedUrl.stream[0].format[0].codec[0].url_info[0].extra.match(/expires=(\d+)/)[1]);
             if (Date.now() / 1000 > expireTs) localStorage.removeItem(i);
         })
@@ -528,6 +533,7 @@
         const value = prompt("请输入playurl json字符串或带query string的完整flv网址\n如出错请取消勾选强制原画；留空点击确定清除当前直播间设置");
         if (value === null) return;
         const room_id = getRoomId();
+        const custom_url_pat = /^(https:\/\/[^\/]+)(\/.+flv)/;
         if (value === "") {
             localStorage.removeItem('playurl-' + room_id);
             expiredPlayurlChecker();
@@ -550,6 +556,24 @@
                         })
                     });
                     console.debug('parsed stream url to playurl', data);
+                } else if (value.match(custom_url_pat)) {
+                    console.debug("Using Custom Url");
+                    const m = value.match(custom_url_pat);
+                    data = getPlayUrl(getRoomId());
+                    data.stream.forEach( i => {
+                        i.format.forEach( j => {
+                            j.codec.forEach( k => {
+                                k.force = 1;// force caching
+                                k.base_url = m[2];
+                                k.url_info.forEach( u => {
+                                    u.extra = "";
+                                    u.host = m[1];
+                                })
+                                k.url_info = [k.url_info[0]];
+                            })
+                        })
+                    });
+                    console.debug(data);
                 } else {
                     console.debug('parsing playurl as json', value);
                     data = JSON.parse(value);
